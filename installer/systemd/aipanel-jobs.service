@@ -1,0 +1,32 @@
+[Unit]
+Description=aipanel background jobs (ARQ worker)
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service aipanel-web.service network-online.target
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+EnvironmentFile=/etc/aipanel/secrets.env
+
+ExecStart=/opt/aipanel/panel/backend/.venv/bin/python -m aipanel.jobs.arq_worker
+
+TimeoutStartSec=60
+Restart=always
+RestartSec=5
+
+LimitNOFILE=65536
+
+StandardOutput=append:/var/log/aipanel/jobs.log
+StandardError=append:/var/log/aipanel/jobs.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel /tmp
+
+[Install]
+WantedBy=multi-user.target

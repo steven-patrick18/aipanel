@@ -1,0 +1,35 @@
+[Unit]
+Description=aipanel ViciDial Session Manager
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service network-online.target
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+
+EnvironmentFile=/etc/aipanel/secrets.env
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/aipanel/playwright-browsers
+
+ExecStart=/opt/aipanel/session-mgr/.venv/bin/python -m aipanel_vici.main
+
+# Chromium spin-up takes a few seconds; give startup some headroom.
+TimeoutStartSec=120
+Restart=always
+RestartSec=10
+
+LimitNOFILE=65536
+
+StandardOutput=append:/var/log/aipanel/vici.log
+StandardError=append:/var/log/aipanel/vici.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel /tmp
+
+[Install]
+WantedBy=multi-user.target

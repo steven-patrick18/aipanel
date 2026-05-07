@@ -1,0 +1,28 @@
+[project]
+name = "aipanel-embed"
+version = "0.12.0"
+description = "aipanel embedding server — BAAI/bge-m3 over FastAPI"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+
+dependencies = [
+    "sentence-transformers>=3.0",
+    "torch>=2.2",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.5,<3",
+    "structlog>=24.1",
+    "python-dotenv>=1.0",
+    "prometheus-client>=0.19",
+    "nvidia-ml-py>=12.535",
+]
+
+[project.scripts]
+aipanel-embed = "aipanel_embed.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

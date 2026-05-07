@@ -1,0 +1,36 @@
+[Unit]
+Description=aipanel embed-server (BAAI/bge-m3)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+EnvironmentFile=/etc/aipanel/secrets.env
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=HF_HUB_OFFLINE=1
+Environment=HF_HOME=/var/lib/aipanel/models/hf-cache
+Environment=TRANSFORMERS_CACHE=/var/lib/aipanel/models/embed
+
+ExecStart=/opt/aipanel/embed-server/.venv/bin/python -m aipanel_embed.main
+
+# bge-m3 first-load is ~30s on GPU, ~90s on CPU.
+TimeoutStartSec=180
+Restart=on-failure
+RestartSec=10
+
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+StandardOutput=append:/var/log/aipanel/embed.log
+StandardError=append:/var/log/aipanel/embed.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel
+
+[Install]
+WantedBy=multi-user.target

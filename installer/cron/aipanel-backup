@@ -1,0 +1,8 @@
+# /etc/cron.d/aipanel-backup
+# Installed by installer/lib/ops.sh. Re-runs are idempotent.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+SHELL=/bin/bash
+
+# Daily nightly backup at 02:30 UTC. --keep=14 retains two weeks.
+30 2 * * *   root  /opt/aipanel/backup.sh --keep=14 --quiet >> /var/log/aipanel/backup.cron.log 2>&1

@@ -1,0 +1,48 @@
+[Unit]
+Description=aipanel SIP service (PJSIP registrar + call dispatcher)
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service network-online.target
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+
+# /etc/aipanel/secrets.env contains DB_PASSWORD, REDIS_PASSWORD,
+# ENCRYPTION_KEY etc. systemd reads it as KEY=VALUE and exports each line.
+EnvironmentFile=/etc/aipanel/secrets.env
+
+# /run/aipanel/calls/<call_id>.sock — systemd creates and chowns this dir
+# every boot, then removes it on stop, so we never inherit stale sockets
+# from a crashed previous run.
+RuntimeDirectory=aipanel/calls
+RuntimeDirectoryMode=0750
+
+ExecStart=/opt/aipanel/sip/.venv/bin/python -m aipanel_sip.main
+
+# Crash recovery: PJSIP can die on bad RTP packets in the wild; restart fast.
+Restart=always
+RestartSec=5
+
+# PJSIP is fd-hungry (one per call leg + a few per RTP session) and audio
+# threads benefit from real-time scheduling and pinned memory.
+LimitNOFILE=65536
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+
+# stdout/stderr → /var/log/aipanel/sip.log (structlog already emits JSON).
+StandardOutput=append:/var/log/aipanel/sip.log
+StandardError=append:/var/log/aipanel/sip.log
+
+# Filesystem hardening — be permissive enough that PJSIP can open RTP sockets
+# but block everything we don't need.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /run/aipanel
+
+[Install]
+WantedBy=multi-user.target

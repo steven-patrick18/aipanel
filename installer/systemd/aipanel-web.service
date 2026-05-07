@@ -1,0 +1,32 @@
+[Unit]
+Description=aipanel web API (FastAPI / uvicorn)
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service network-online.target
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+EnvironmentFile=/etc/aipanel/secrets.env
+
+ExecStart=/opt/aipanel/panel/backend/.venv/bin/python -m aipanel.main
+
+TimeoutStartSec=60
+Restart=always
+RestartSec=5
+
+LimitNOFILE=65536
+
+StandardOutput=append:/var/log/aipanel/web.log
+StandardError=append:/var/log/aipanel/web.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel
+
+[Install]
+WantedBy=multi-user.target

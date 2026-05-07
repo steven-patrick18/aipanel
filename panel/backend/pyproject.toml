@@ -1,0 +1,51 @@
+[project]
+name = "aipanel-backend"
+version = "0.7.0"
+description = "aipanel admin panel — FastAPI backend"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pydantic>=2.5,<3",
+    "pydantic-settings>=2.2",
+    "pyjwt>=2.8,<3",
+    "passlib[argon2]>=1.7",
+    "python-multipart>=0.0.9",
+    "python-dotenv>=1.0",
+    "structlog>=24.1",
+    "httpx[http2]>=0.27",
+    "redis[hiredis]>=5.0,<6",
+    "arq>=0.25",
+    "minio>=7.2",
+    "cryptography>=42.0",
+    "prometheus-client>=0.19",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "aiosqlite>=0.20",
+]
+
+[project.scripts]
+aipanel-web  = "aipanel.main:main"
+aipanel-jobs = "aipanel.jobs.arq_worker:run"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"

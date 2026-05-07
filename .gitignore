@@ -1,0 +1,50 @@
+# Models / large binaries
+/models/
+models/*
+
+# Runtime state
+/var/
+var/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+build/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local overrides
+.env
+.env.local
+*.local
+config.local.*
+
+# Installer artifacts
+/tmp/aipanel-*
+
+# Claude Code session storage
+.claude/
+
+# Local docker volumes (we keep dev/secrets.dev.env intentionally — see dev/README.md)

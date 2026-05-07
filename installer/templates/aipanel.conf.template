@@ -1,0 +1,124 @@
+# /etc/aipanel/aipanel.conf
+# Rendered from installer/templates/aipanel.conf.template on first install.
+# The installer NEVER overwrites this file once present — edit freely and
+# restart aipanel-* services to apply.
+#
+# Secrets (passwords, keys) live in /etc/aipanel/secrets.env, not here.
+
+[database]
+host = "127.0.0.1"
+port = 5432
+name = "aipanel"
+user = "aipanel"
+pool_min = 2
+pool_max = 16
+# password ← secrets.env DB_PASSWORD
+
+[redis]
+host = "127.0.0.1"
+port = 6379
+db = 0
+# password ← secrets.env REDIS_PASSWORD (empty when redis is local-only)
+
+[minio]
+endpoint = "127.0.0.1:9000"
+console_endpoint = "127.0.0.1:9001"
+secure = false
+bucket_recordings = "aipanel-recordings"
+bucket_transcripts = "aipanel-transcripts"
+bucket_kb = "aipanel-kb"
+bucket_voices = "aipanel-voices"
+# access_key/secret_key ← secrets.env MINIO_ACCESS_KEY / MINIO_SECRET_KEY
+
+[sip]
+listen_host = "0.0.0.0"
+listen_port = 5060
+public_ip = "${PUBLIC_IP}"
+rtp_port_min = 16384
+rtp_port_max = 32767
+codec_preference = ["opus", "PCMU", "PCMA"]
+
+[llm]
+provider = "vllm"
+endpoint = "http://127.0.0.1:8001/v1"
+model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+max_tokens = 512
+temperature = 0.4
+request_timeout_sec = 30
+# Server-side knobs (consumed by aipanel-llm.service):
+listen_host = "127.0.0.1"
+listen_port = 8001
+internal_port = 8011
+gpu_memory_utilization = 0.6
+max_model_len = 8192
+tensor_parallel_size = 1
+enable_auto_tool_choice = true
+tool_call_parser = "hermes"
+
+[stt]
+provider = "faster-whisper"
+endpoint = "http://127.0.0.1:8002"
+model = "large-v3"
+language = "en"
+vad_threshold = 0.5
+# Server-side knobs:
+listen_host = "127.0.0.1"
+listen_port = 8002
+device = "auto"           # auto | cuda | cpu
+compute_type = "float16"  # float16 | int8_float16 | int8 | float32
+beam_size = 5
+beam_size_partial = 1
+partial_interval_ms = 300
+
+[embed]
+# Embed-server endpoint used by KB ingest + RAG search.
+endpoint = "http://127.0.0.1:8004"
+model    = "BAAI/bge-m3"
+
+[tts]
+# backend = "f5" (high quality + voice cloning) or "kokoro" (fast,
+# sub-300 ms first byte, no per-customer cloning).
+provider = "f5"
+endpoint = "http://127.0.0.1:8003"
+default_voice_id = ""
+sample_rate = 24000
+# Server-side knobs:
+listen_host = "127.0.0.1"
+listen_port = 8003
+backend = "f5"            # f5 | noop
+device = "auto"
+output_format_default = "ulaw_8000"  # ulaw_8000 | pcm_s16le_8000 | pcm_s16le_24000
+voices_dir = "/var/lib/aipanel/voices"
+
+[panel]
+listen_host = "0.0.0.0"
+listen_port = 8000
+public_url = "${PANEL_PUBLIC_URL}"
+session_lifetime_hours = 12
+cors_origins = []
+# jwt_secret ← secrets.env JWT_SECRET
+
+[cluster]
+node_role = "primary"
+hostname = "${HOSTNAME_FQDN}"
+heartbeat_interval_sec = 10
+quorum_min_nodes = 1
+
+[worker]
+# Per-process concurrency cap. Override via systemd EnvironmentFile or:
+# Environment=AIPANEL_WORKER_CONCURRENCY=20 in the unit drop-in.
+concurrency = 10
+llm_max_response_tokens = 256
+
+[vici]
+# url/enabled are read by the worker (prompt 6) — point at the session
+# manager once it's up:
+url = "http://127.0.0.1:8010"
+enabled = true
+
+# Session-manager-only knobs:
+adapter = "v2_14"
+session_mgr_host = "127.0.0.1"
+session_mgr_port = 8010
+playwright_browsers_path = "/var/lib/aipanel/playwright-browsers"
+browser_pool_size = 3

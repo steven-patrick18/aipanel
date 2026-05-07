@@ -1,0 +1,41 @@
+[Unit]
+Description=aipanel conversation workers
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service \
+      aipanel-llm.service aipanel-stt.service aipanel-tts.service \
+      network-online.target
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+
+EnvironmentFile=/etc/aipanel/secrets.env
+# Override at install time or via drop-in: AIPANEL_WORKER_CONCURRENCY=20
+Environment=AIPANEL_WORKER_CONCURRENCY=10
+
+ExecStart=/opt/aipanel/workers/.venv/bin/python -m aipanel_worker.main
+
+# Workers can take ~10 s to import psycopg + httpx + websockets at start.
+TimeoutStartSec=60
+
+# always: a worker death is recoverable — the supervisor will pick up where
+# the previous one left off (in-flight calls die, but the queue persists).
+Restart=always
+RestartSec=5
+
+LimitNOFILE=65536
+
+StandardOutput=append:/var/log/aipanel/workers.log
+StandardError=append:/var/log/aipanel/workers.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel /tmp /run/aipanel
+
+[Install]
+WantedBy=multi-user.target

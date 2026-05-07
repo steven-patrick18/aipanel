@@ -1,0 +1,44 @@
+[Unit]
+Description=aipanel LLM service (vLLM proxy)
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+
+EnvironmentFile=/etc/aipanel/secrets.env
+# Pin GPU 0 by default; operators override with a drop-in:
+#   /etc/systemd/system/aipanel-llm.service.d/cuda.conf
+Environment=CUDA_VISIBLE_DEVICES=0
+
+ExecStart=/opt/aipanel/llm-server/start.sh
+
+# Model load can take ~2 min on first run; vLLM compiles CUDA kernels on
+# top of that. Don't let systemd kill us prematurely.
+TimeoutStartSec=300
+
+# on-failure (not always): if the model fails to load we'd otherwise loop
+# forever holding the GPU. on-failure restarts only on non-zero exit / signal,
+# letting `systemctl status` show the operator a clear failure.
+Restart=on-failure
+RestartSec=10
+
+# vLLM opens many fds (workers, RTP, KV cache shards).
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+StandardOutput=append:/var/log/aipanel/llm.log
+StandardError=append:/var/log/aipanel/llm.log
+
+# Hardening — vLLM needs /dev/nvidia*, which ProtectSystem=full leaves alone.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel
+
+[Install]
+WantedBy=multi-user.target

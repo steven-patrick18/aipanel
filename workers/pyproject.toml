@@ -1,0 +1,44 @@
+[project]
+name = "aipanel-worker"
+version = "0.5.0"
+description = "aipanel conversation worker — per-call STT↔LLM↔TTS orchestrator"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+
+dependencies = [
+    "redis[hiredis]>=5.0,<6",
+    "psycopg[binary,pool]>=3.1,<4",
+    "websockets>=12",
+    "httpx[http2]>=0.27",
+    "jinja2>=3.1",
+    "pydantic>=2.5,<3",
+    "structlog>=24.1",
+    "numpy>=1.26",
+    "python-dotenv>=1.0",
+    "prometheus-client>=0.19",
+    # MinIO uploads at end-of-call.
+    "minio>=7.2",
+    # audioop disappears in 3.13; the stdlib version is fine on 3.11/3.12.
+    "audioop-lts>=0.2 ; python_version >= '3.13'",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+aipanel-worker = "aipanel_worker.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"

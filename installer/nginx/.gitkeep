@@ -1,0 +1,4 @@
+# Placeholder. The nginx site config template lands here in v0.2.0.
+# Expected file: aipanel.conf.template — rendered into /etc/nginx/sites-available/
+# by the installer with TLS paths, upstream targets, and the dashboard
+# location block populated from /etc/aipanel/aipanel.env.

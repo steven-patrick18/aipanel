@@ -1,0 +1,32 @@
+[project]
+name = "aipanel-llm"
+version = "0.4.0"
+description = "aipanel LLM service — thin proxy in front of vLLM"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+
+dependencies = [
+    # vLLM is the actual inference engine. Pulls in torch + cuda runtime.
+    "vllm>=0.6.0,<0.8",
+    # Proxy / health / metrics
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.27",
+    "prometheus-client>=0.19",
+    # Shared
+    "pydantic>=2.5,<3",
+    "structlog>=24.1",
+    "python-dotenv>=1.0",
+    # Optional: GPU memory reporting in /health
+    "nvidia-ml-py>=12.535",
+]
+
+[project.scripts]
+aipanel-llm = "aipanel_llm.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

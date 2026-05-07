@@ -1,0 +1,43 @@
+[project]
+name = "aipanel-tts"
+version = "0.12.0"
+description = "aipanel TTS service — F5-TTS / Kokoro streaming with voice cloning"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+
+dependencies = [
+    # F5-TTS pulls in torch, torchaudio, vocos, etc. Heavy install.
+    "f5-tts>=0.3 ; platform_system == 'Linux'",
+    # Kokoro fast TTS — sub-300 ms first byte. ONNX, no PyTorch needed for
+    # inference. Use [tts] backend = "kokoro" to switch the active engine.
+    "kokoro-onnx>=0.3 ; platform_system == 'Linux'",
+    "numpy>=1.26",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+    # audioop disappears in Python 3.13; the LTS package is a drop-in shim.
+    # On 3.11/3.12 the stdlib `audioop` is still preferred and we import it
+    # directly; this dep just future-proofs the venv.
+    "audioop-lts>=0.2 ; python_version >= '3.13'",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "psycopg[binary]>=3.1,<4",
+    "prometheus-client>=0.19",
+    "pydantic>=2.5,<3",
+    "structlog>=24.1",
+    "python-dotenv>=1.0",
+    "nvidia-ml-py>=12.535",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+aipanel-tts = "aipanel_tts.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

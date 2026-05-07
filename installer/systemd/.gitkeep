@@ -1,0 +1,3 @@
+# Placeholder. Service unit files land here in subsequent versions.
+# Conventional names: aipanel-api.service, aipanel-worker.service,
+# aipanel-asr.service, aipanel-tts.service, aipanel-llm.service, etc.

@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Reset focus rings to a consistent indigo across the app. */
+@layer base {
+  :focus-visible {
+    @apply outline-none ring-2 ring-indigo-500 ring-offset-2 ring-offset-white;
+  }
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply h-full;
+  }
+}
+
+/* xyflow doesn't ship CSS in its main entry — pull the bundled theme in. */
+@import "@xyflow/react/dist/style.css";
+
+/* Sonner positioning override so toasts don't fight the topbar. */
+[data-sonner-toaster][data-y-position="top"] {
+  top: 4.5rem;
+}

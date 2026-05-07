@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# aipanelctl — single dispatch wrapper for the operational scripts.
+#
+# Installed by installer/lib/ops.sh as /usr/local/bin/aipanelctl pointing
+# at /opt/aipanel/aipanelctl. Each subcommand exec's the underlying script,
+# so all flags, exit codes, and behaviour are identical to invoking the
+# script directly.
+
+set -euo pipefail
+
+AIPANEL_PREFIX="${AIPANEL_PREFIX:-/opt/aipanel}"
+
+usage() {
+    cat <<EOF
+aipanelctl — operational entry point for the aipanel platform.
+
+Usage:
+  aipanelctl status [--json|--watch]                show service + resource state
+  aipanelctl health                                 single-line ok|degraded|down
+  aipanelctl logs [<service>|all] [--grep PAT] [--since "1h ago"] [-n N]
+  aipanelctl update [--to=<ver>|--rollback|--dry-run|...]
+  aipanelctl backup [--to=<dir>|--include-recordings|--encrypt --key-file=...]
+  aipanelctl restore --from=<archive> [--target-version=<ver>|--dry-run]
+  aipanelctl version                                print version + git SHA
+  aipanelctl help                                   this message
+
+Each subcommand maps to /opt/aipanel/<name>.sh — pass --help to any of them
+for full flag documentation.
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "${cmd}" in
+    status)         exec "${AIPANEL_PREFIX}/status.sh"  "$@" ;;
+    health)         exec "${AIPANEL_PREFIX}/status.sh"  --health-only "$@" ;;
+    logs|log)       exec "${AIPANEL_PREFIX}/logs.sh"    "$@" ;;
+    update|upgrade) exec "${AIPANEL_PREFIX}/update.sh"  "$@" ;;
+    backup)         exec "${AIPANEL_PREFIX}/backup.sh"  "$@" ;;
+    restore)        exec "${AIPANEL_PREFIX}/restore.sh" "$@" ;;
+    version)
+        v="$(cat "${AIPANEL_PREFIX}/VERSION" 2>/dev/null || echo unknown)"
+        sha="$(git -C "${AIPANEL_PREFIX}" rev-parse --short HEAD 2>/dev/null || echo -)"
+        printf 'aipanel %s (%s)\n' "${v}" "${sha}"
+        ;;
+    help|--help|-h|"")
+        usage
+        ;;
+    *)
+        printf 'Unknown subcommand: %s\n\n' "${cmd}" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

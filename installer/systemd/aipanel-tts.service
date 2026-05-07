@@ -1,0 +1,34 @@
+[Unit]
+Description=aipanel TTS service (F5-TTS streaming + voice cloning)
+Documentation=https://github.com/aipanel/aipanel
+After=postgresql.service redis-server.service aipanel-llm.service aipanel-stt.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aipanel
+Group=aipanel
+
+EnvironmentFile=/etc/aipanel/secrets.env
+Environment=CUDA_VISIBLE_DEVICES=0
+
+ExecStart=/opt/aipanel/tts-server/.venv/bin/python -m aipanel_tts.main
+
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec=10
+
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+StandardOutput=append:/var/log/aipanel/tts.log
+StandardError=append:/var/log/aipanel/tts.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/aipanel /var/lib/aipanel
+
+[Install]
+WantedBy=multi-user.target
