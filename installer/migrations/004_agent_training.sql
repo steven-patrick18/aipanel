@@ -1,20 +1,18 @@
--- 004_agent_training.sql — operator-curated training examples per agent.
+-- 004_agent_training.sql — operator-uploaded training recordings per agent.
 --
--- Each row in `training_examples` is a JSON object of one of two shapes:
+-- Each row in `training_recordings` is a JSON object describing one
+-- audio file the operator uploaded as conversation material:
 --
---   { "id": "...", "kind": "manual",
---     "user": "...", "agent": "...", "notes": "...",
---     "added_at": "...", "added_by": "..." }
+--   { "id": "...", "filename": "...", "content_type": "audio/wav",
+--     "size_bytes": 123456, "label": "...",
+--     "storage_path": "s3://aipanel-recordings/training/...",
+--     "status": "queued|transcribing|ready|error",
+--     "transcript": "..." | null,
+--     "uploaded_at": "...", "uploaded_by": "..." }
 --
---   { "id": "...", "kind": "call",
---     "call_id": "...", "user": "...", "agent": "...",
---     "recording_path": "s3://...", "notes": "...",
---     "added_at": "...", "added_by": "..." }
---
--- These ride into the LLM prompt as in-context examples in addition to
--- the campaign few-shot pool, scoped to the specific agent. Operators
--- curate them either by typing pairs directly or by marking a recorded
--- call as exemplary on the call detail page.
+-- The transcription pipeline (faster-whisper → turn-pair extraction)
+-- writes the resulting `{user, agent}` pairs into the agent's
+-- few-shot pool, so the LLM learns from real human conversations.
 
 ALTER TABLE agents
-    ADD COLUMN IF NOT EXISTS training_examples jsonb NOT NULL DEFAULT '[]'::jsonb;
+    ADD COLUMN IF NOT EXISTS training_recordings jsonb NOT NULL DEFAULT '[]'::jsonb;

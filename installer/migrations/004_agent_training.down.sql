@@ -1,1 +1,1 @@
-ALTER TABLE agents DROP COLUMN IF EXISTS training_examples;
+ALTER TABLE agents DROP COLUMN IF EXISTS training_recordings;

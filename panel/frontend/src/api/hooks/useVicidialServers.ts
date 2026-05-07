@@ -33,3 +33,36 @@ export function useTestVicidialConnection(id: string) {
     },
   });
 }
+
+export interface ViciCampaign { code: string; name: string; }
+export interface ViciIngroup { code: string; name: string; }
+
+/**
+ * Read available campaigns from a registered ViciDial server.
+ * The "New deployment" form uses this to fill the campaign dropdown.
+ */
+export function useViciCampaigns(serverId: string | undefined) {
+  return useQuery({
+    queryKey: ["vicidial-servers", serverId, "campaigns"],
+    queryFn: async () =>
+      (await api.get<ViciCampaign[]>(
+        `/vicidial-servers/${serverId}/campaigns`,
+      )).data,
+    enabled: !!serverId,
+  });
+}
+
+/**
+ * Read available inbound groups (transfer targets) from a ViciDial server.
+ * Used to populate the "Allowed transfer ingroups" multi-select.
+ */
+export function useViciIngroups(serverId: string | undefined) {
+  return useQuery({
+    queryKey: ["vicidial-servers", serverId, "ingroups"],
+    queryFn: async () =>
+      (await api.get<ViciIngroup[]>(
+        `/vicidial-servers/${serverId}/ingroups`,
+      )).data,
+    enabled: !!serverId,
+  });
+}

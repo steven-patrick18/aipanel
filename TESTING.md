@@ -1,19 +1,60 @@
 # Testing & training the panel
 
-There are three ways to run the panel — pick the one that matches what
-you want to validate:
+Three ways to run the panel — pick the one that matches what you want:
 
 | Mode | Backs onto | Use when |
 |------|-----------|----------|
-| **Mock** | a Node script with hard-coded data | clicking through the UI on Windows; no Docker, no Linux |
-| **Real local** | Postgres + Redis + MinIO in Docker | exercising auth, audit log, RAG, scenario persistence on real schema |
+| **Mock** | tiny Node script with persistent JSON state | exploring + clicking through the UI on Windows; no Docker needed |
+| **Real local** | Postgres + Redis + MinIO in Docker | exercising auth, audit log, RAG, real schema |
 | **Production** | the full Linux install (`install.sh`) | actually placing calls — needs ViciDial, vLLM, faster-whisper, GPU |
 
 ---
 
-## Mode 1 — Mock (zero setup)
+## Admin credentials
 
-Already wired up. Two terminals:
+### Mock mode (default — what's running on your laptop)
+
+The mock backend accepts **any email + any non-empty password**. Whatever
+email you sign in with, the seeded user looks like this in the UI:
+
+```
+email:    admin@aipanel.local
+role:     admin
+tenant:   Default
+```
+
+So: just use **`admin@aipanel.local`** and any password (e.g. `admin`).
+Role checks pass because the mock always stamps you as admin.
+
+### Real local mode (Docker)
+
+`dev/start.ps1` bootstraps the first admin if the `users` table is empty:
+
+```
+email:     admin@local
+password:  changeme
+```
+
+Change it after first login from **System → Users**, or seed your own:
+
+```powershell
+$env:AIPANEL_CONF    = "D:\aipanel\dev\aipanel.dev.conf"
+$env:AIPANEL_SECRETS = "D:\aipanel\dev\secrets.dev.env"
+& D:\aipanel\panel\backend\.venv\Scripts\python.exe `
+    D:\aipanel\dev\bootstrap_admin.py `
+    --tenant Default --email you@example.com --password 'pick-something-strong'
+```
+
+### Production
+
+```bash
+sudo ./scripts/bootstrap_admin.sh \
+    --tenant=Acme --email=ops@acme.com --password='change-me-strong'
+```
+
+---
+
+## Mode 1 — Mock (what you're using now)
 
 ```powershell
 # Terminal A — mock backend (port 8800)
@@ -25,53 +66,66 @@ cd D:\aipanel\panel\frontend
 npm run dev
 ```
 
-Open <http://127.0.0.1:8055/login>. **Sign in with any email + any
-non-empty password** — the mock accepts everything and always returns
-the seed admin user. Mock seeds:
+Open <http://127.0.0.1:8055/login>. **All seed data is empty** — you add
+your own real entries from the start. Everything you add persists to
+`mock-state.json` next to `mock-backend.mjs`, so restarts don't lose
+your work. Delete `mock-state.json` to wipe and start fresh.
 
-- 3 agents (Solar, Insurance, Generic) with personas/scripts/scenarios
-- 1 ViciDial server, 3 deployments, 28 calls (the first 2 are "live"
-  so you can try the live-call Transfer button)
-- 4 voices, 2 knowledge bases, 1 campaign with metrics + few-shot pool
-- 3 users, 4 audit log entries, 5 sales methodologies
+### The bring-up flow
 
-Every page is wired and works. Pages with state-changing dialogs:
+The order matters because each step unlocks dropdowns in the next:
 
-- **Agents**: `New agent` creates a draft you can edit (Persona/Voice/
-  Script/Scenarios/KB tabs)
-- **Voices**: `Clone voice` (record from mic OR upload) — recorder
-  needs `https://` or `localhost` for `getUserMedia()`
-- **Knowledge bases**: `New KB` + per-KB upload + retrieval test
-- **Campaigns**: `New campaign` (pick a methodology) + `Refresh few-shot`
-- **ViciDial servers**: `Add server` + `Test connection`
-- **Deployments**: `New deployment` (binds an agent + ViciDial seat)
-- **Call detail** (live calls only): `Transfer to ingroup`,
-  `Test call` from agent detail
-- **Users**: invite / change role / remove (admin only)
-- **Audit log**: filter by action prefix
+1. **System → Users** — invite your team (admin / operator / viewer)
+2. **Knowledge bases** — upload product PDFs, FAQs (optional)
+3. **Voices** — clone a voice from a 30-60s mic recording (optional)
+4. **Campaigns** — create a campaign with a sales methodology
+   (consultative / SPIN / BANT / MEDDPICC / value-based / custom)
+5. **Agents** — `New agent`, fill in Persona / Voice / Script /
+   Scenarios / Knowledge base. **Save**, then **Promote to ready**.
+   Use the **Training** tab to upload real call recordings.
+6. **ViciDial servers** — register your dialler (web URL + AMI creds)
+7. **Deployments** — `New deployment`. The form pulls available
+   campaigns + ingroups straight from the ViciDial server you pick —
+   no need to type codes by hand. Pair it with one of your agents.
+8. Open the deployment → **Start**. Once Session Manager is running
+   (real backend), the AI agent logs into ViciDial and starts handling
+   inbound calls.
 
-What mock mode **cannot** validate: real JWT lifecycle, password
-hashing, audit-log persistence across reloads, RAG retrieval against
-pgvector, scenario_tree stored in JSONB, real ViciDial integration.
+### Training agents from real conversations
+
+**Agents → any agent → Training tab → Upload**
+
+Drop a recording (WAV / MP3 / M4A / OPUS / OGG / FLAC) of a real
+conversation — ideally one of your top human agents handling a tough
+call. The backend transcribes it (faster-whisper large-v3) and feeds
+the resulting `{user, agent}` pairs into this agent's few-shot pool.
+
+The LLM sees those pairs as in-context examples on every call, so it
+learns tone, pacing, and the moves that actually convert. Upload as
+many as you have — more good examples = better mimicry.
+
+That's it. No transcript-marking, no typed examples — just upload
+audio and let transcription do the work.
 
 ---
 
 ## Mode 2 — Real local (needs Docker Desktop)
 
 The system uses Postgres-only features (pgvector, JSONB, partitioned
-tables, ENUM types) so SQLite isn't a viable swap. You need Docker.
+tables, ENUM types) so SQLite isn't an option. You need Docker.
 
 ### One-time install
 
-1. Install **Docker Desktop for Windows** (<https://docs.docker.com/desktop/install/windows-install/>)
-   and start it (the whale icon in the system tray must be green).
-2. Confirm Docker is on PATH from PowerShell:
+1. Install **Docker Desktop for Windows**
+   (<https://docs.docker.com/desktop/install/windows-install/>) and
+   make sure the whale icon in the system tray is green.
+2. Confirm from PowerShell:
    ```powershell
    docker --version
    docker compose version
    ```
 
-### Bring up the stack
+### Bring it up
 
 ```powershell
 cd D:\aipanel
@@ -80,15 +134,11 @@ cd D:\aipanel
 
 What happens:
 
-1. `docker compose up -d` brings up Postgres (with pgvector), Redis,
-   MinIO on `127.0.0.1` only.
-2. The Postgres init script applies `installer/migrations/*.sql` on
-   first boot.
-3. `panel\backend\.venv` is created and the backend is `pip install -e`
-   the first time only.
-4. **Admin user `admin@local` / `changeme` is bootstrapped** if the
-   `users` table is empty.
-5. uvicorn starts on `http://127.0.0.1:8000` with `--reload`.
+1. `docker compose up -d` — Postgres (with pgvector), Redis, MinIO
+2. Postgres init script applies `installer/migrations/*.sql`
+3. `panel\backend\.venv` is created + `pip install -e` (first run only)
+4. Bootstraps `admin@local` / `changeme`
+5. uvicorn starts on `http://127.0.0.1:8000` with `--reload`
 
 In a second terminal point Vite at the real backend:
 
@@ -98,38 +148,22 @@ $env:VITE_API_TARGET="http://127.0.0.1:8000"
 npm run dev
 ```
 
-Sign in at <http://127.0.0.1:8055/login> with `admin@local` /
-`changeme`. From here the Users page can invite real users; their
-password hashes go into Postgres.
-
-### Add another admin
-
-```powershell
-$env:AIPANEL_CONF    = "D:\aipanel\dev\aipanel.dev.conf"
-$env:AIPANEL_SECRETS = "D:\aipanel\dev\secrets.dev.env"
-& D:\aipanel\panel\backend\.venv\Scripts\python.exe `
-    D:\aipanel\dev\bootstrap_admin.py `
-    --tenant Default --email you@example.com --password 'pick-something-strong'
-```
+Sign in at <http://127.0.0.1:8055/login> with **`admin@local` /
+`changeme`**.
 
 ### Tear down
 
 ```powershell
 docker compose -f dev\docker-compose.yml down       # stops, keeps data
-docker compose -f dev\docker-compose.yml down -v    # also drops Postgres + MinIO volumes
+docker compose -f dev\docker-compose.yml down -v    # also drops volumes
 ```
-
-What real-local mode **cannot** validate: actually placing calls
-(needs PJSIP + ViciDial + a softphone), LLM/STT/TTS quality (those
-servers need GPU + huge model downloads), end-to-end conversation
-loops.
 
 ---
 
 ## Mode 3 — Production (Linux + ViciDial)
 
-This is what `install.sh` is for. On Ubuntu 22.04 with NVIDIA + a
-ViciDial 2.14 dialler reachable on the network:
+On Ubuntu 22.04 with NVIDIA + a ViciDial 2.14 dialler reachable on
+the network:
 
 ```bash
 sudo ./install.sh
@@ -137,30 +171,19 @@ sudo ./scripts/bootstrap_admin.sh \
     --tenant=Acme --email=ops@acme.com --password='change-me-strong'
 ```
 
-Then you can:
-
-- Add the ViciDial server through the panel (one entry per dialler)
-- Create an agent + clone a voice
-- Create a deployment that binds the agent to a ViciDial seat
-- Start the deployment — Session Manager logs in via Playwright and
-  stays in until you stop it
-- Inbound calls hit PJSIP, get transcribed, run through the LLM,
-  responses are TTS'd back, calls get disposed in ViciDial
-- Operator can mid-call **Transfer to ingroup** from the panel
-
-Re-read `installer/README.md` for the install flow, GPU requirements,
-and ViciDial side configuration.
+Then bring up the platform through the UI exactly as in Mode 1's
+bring-up flow above. Real ViciDial returns real campaigns + ingroups in
+the discovery dropdowns. Real recordings get real transcripts. Real
+calls hit PJSIP, get transcribed by faster-whisper, run through vLLM,
+TTS'd back, and disposed in ViciDial.
 
 ---
 
 ## What's NOT in the box
 
-- A softphone — recommend [Zoiper](https://www.zoiper.com/) for
-  manual SIP testing
-- A ViciDial install — get one from <https://vicidial.com> or build
-  from source
-- Trained voice samples — the F5 TTS server can clone from a 30-60s
-  reference clip; feed it through the **Voices → Clone voice** dialog
-- Tuned LLM weights — defaults to `Qwen/Qwen2.5-14B-Instruct-AWQ`
-  which is good out-of-box for English sales calls; swap via the
-  `[llm].model` setting in `aipanel.conf`
+- A softphone — recommend [Zoiper](https://www.zoiper.com/) for SIP testing
+- A ViciDial install — get one from <https://vicidial.com> or build from source
+- Trained voice samples — clone from a 30-60s reference clip via
+  **Voices → Clone voice**
+- Tuned LLM weights — defaults to `Qwen/Qwen2.5-14B-Instruct-AWQ`;
+  swap via `[llm].model` in `aipanel.conf`

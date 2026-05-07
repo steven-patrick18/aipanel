@@ -87,9 +87,9 @@ class Agent(Base):
     language:         Mapped[str]               = mapped_column(
         Text, nullable=False, default="en", server_default="en",
     )
-    script:             Mapped[dict]              = jsonb_default(dict)
-    scenario_tree:      Mapped[dict]              = jsonb_default(dict)
-    training_examples:  Mapped[list]              = jsonb_default(list)
+    script:               Mapped[dict]            = jsonb_default(dict)
+    scenario_tree:        Mapped[dict]            = jsonb_default(dict)
+    training_recordings:  Mapped[list]            = jsonb_default(list)
     kb_collection_id: Mapped[UUID | None]       = mapped_column(
         PgUUID(as_uuid=True),
         ForeignKey("knowledge_bases.id", ondelete="SET NULL"),

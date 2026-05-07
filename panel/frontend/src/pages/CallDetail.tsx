@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Bot, Download, PhoneForwarded, Sparkles, User } from "lucide-react";
+import { Bot, Download, PhoneForwarded, User } from "lucide-react";
 import {
   useCall,
   useCallEvents,
@@ -9,7 +9,6 @@ import {
   useTransferCall,
   useTransferOptions,
 } from "@/api/hooks/useCalls";
-import { useMarkExemplar } from "@/api/hooks/useTraining";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -78,53 +77,39 @@ export function CallDetail() {
               <p className="text-sm text-slate-400">No transcript available.</p>
             ) : (
               <div className="space-y-3">
-                {transcript.data!.turns.map((t, i) => {
-                  const prev = transcript.data!.turns[i - 1];
-                  const canMark = canWrite(role) && id && t.role === "agent" &&
-                                  prev && prev.role === "user";
-                  return (
+                {transcript.data!.turns.map((t, i) => (
+                  <div
+                    key={i}
+                    className={cn("flex gap-2.5",
+                      t.role === "agent" ? "" : "flex-row-reverse"
+                    )}
+                  >
                     <div
-                      key={i}
-                      className={cn("flex gap-2.5",
-                        t.role === "agent" ? "" : "flex-row-reverse"
+                      className={cn(
+                        "h-7 w-7 rounded-full grid place-items-center shrink-0",
+                        t.role === "agent"
+                          ? "bg-indigo-100 text-indigo-700"
+                          : "bg-slate-100 text-slate-600",
                       )}
                     >
+                      {t.role === "agent"
+                        ? <Bot className="h-3.5 w-3.5" />
+                        : <User className="h-3.5 w-3.5" />}
+                    </div>
+                    <div className={cn("max-w-[78%]", t.role === "agent" ? "" : "text-right")}>
                       <div
-                        className={cn(
-                          "h-7 w-7 rounded-full grid place-items-center shrink-0",
+                        className={cn("rounded-lg px-3 py-2 text-sm",
                           t.role === "agent"
-                            ? "bg-indigo-100 text-indigo-700"
-                            : "bg-slate-100 text-slate-600",
+                            ? "bg-indigo-50 text-indigo-900"
+                            : "bg-slate-100 text-slate-900",
                         )}
                       >
-                        {t.role === "agent"
-                          ? <Bot className="h-3.5 w-3.5" />
-                          : <User className="h-3.5 w-3.5" />}
+                        {t.text}
                       </div>
-                      <div className={cn("max-w-[78%]", t.role === "agent" ? "" : "text-right")}>
-                        <div
-                          className={cn("rounded-lg px-3 py-2 text-sm",
-                            t.role === "agent"
-                              ? "bg-indigo-50 text-indigo-900"
-                              : "bg-slate-100 text-slate-900",
-                          )}
-                        >
-                          {t.text}
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                          <span>{fmtDate(t.ts)}</span>
-                          {canMark && (
-                            <MarkExemplarInline
-                              callId={id!}
-                              userTurn={prev.text}
-                              agentTurn={t.text}
-                            />
-                          )}
-                        </div>
-                      </div>
+                      <p className="mt-1 text-[11px] text-slate-400">{fmtDate(t.ts)}</p>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
@@ -271,79 +256,4 @@ function TransferButton({ callId }: { callId: string }) {
   );
 }
 
-function MarkExemplarInline({
-  callId, userTurn, agentTurn,
-}: { callId: string; userTurn: string; agentTurn: string }) {
-  const [open, setOpen] = useState(false);
-  const [user, setUser] = useState(userTurn);
-  const [agent, setAgent] = useState(agentTurn);
-  const [notes, setNotes] = useState("");
-  const mark = useMarkExemplar(callId);
-
-  const submit = async () => {
-    if (!user.trim() || !agent.trim()) return;
-    await mark.mutateAsync({
-      user_turn: user.trim(),
-      agent_turn: agent.trim(),
-      notes: notes.trim() || undefined,
-    });
-    setOpen(false);
-    setNotes("");
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => {
-      setOpen(o);
-      if (o) { setUser(userTurn); setAgent(agentTurn); }
-    }}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-0.5 text-indigo-600 hover:underline"
-        onClick={() => setOpen(true)}
-        title="Save this turn as a training example"
-      >
-        <Sparkles className="h-3 w-3" /> Mark as exemplar
-      </button>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Save as a training example</DialogTitle>
-          <DialogDescription>
-            This turn pair will be added to the agent's training examples
-            and used as in-context guidance on future calls. Edit the
-            text if you want to clean it up first — the LLM sees what
-            you save here verbatim.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label>User said</Label>
-            <Textarea rows={2} value={user}
-                      onChange={(e) => setUser(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Agent's reply (this is the &quot;good&quot; one)</Label>
-            <Textarea rows={3} value={agent}
-                      onChange={(e) => setAgent(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Why is this a good example? (optional)</Label>
-            <Input value={notes}
-                   onChange={(e) => setNotes(e.target.value)}
-                   placeholder="Tone matched the customer's hesitation"/>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button type="button"
-                  disabled={mark.isPending || !user.trim() || !agent.trim()}
-                  onClick={submit}>
-            {mark.isPending ? "Saving…" : "Save example"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 

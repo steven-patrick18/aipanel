@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +20,7 @@ from ...schemas.agent import (
     AgentRead,
     AgentTestCallRequest,
     AgentUpdate,
-    TrainingExampleCreate,
-    TrainingExampleRead,
+    TrainingRecordingRead,
 )
 from ...schemas.common import OkResponse, Page, PaginationParams
 from ...services import agents_service
@@ -233,85 +232,153 @@ async def list_versions(
 
 
 # ---------------------------------------------------------------------------
-# Training examples — operator-curated few-shot examples per agent.
-# These ride into the LLM prompt alongside the campaign few-shot pool;
-# operators add them by typing pairs directly OR by marking a successful
-# call as exemplary on the call detail page.
+# Training recordings — operator-uploaded audio. The transcription
+# pipeline (faster-whisper → turn-pair extraction) feeds the resulting
+# `{user, agent}` pairs into the agent's few-shot pool, so the LLM
+# learns from real human conversations.
 # ---------------------------------------------------------------------------
 
 
-@router.get("/{agent_id}/training-examples",
-            response_model=list[TrainingExampleRead])
-async def list_training_examples(
+@router.get("/{agent_id}/training-recordings",
+            response_model=list[TrainingRecordingRead])
+async def list_training_recordings(
     agent_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     tenant_id: TenantId,
-) -> list[TrainingExampleRead]:
+) -> list[TrainingRecordingRead]:
     a = await agents_service.get_agent(
         session, tenant_id=tenant_id, agent_id=agent_id,
     )
-    return [TrainingExampleRead.model_validate(x) for x in (a.training_examples or [])]
+    return [TrainingRecordingRead.model_validate(x)
+            for x in (a.training_recordings or [])]
 
 
-@router.post("/{agent_id}/training-examples",
-             response_model=TrainingExampleRead, status_code=201,
+@router.post("/{agent_id}/training-recordings",
+             response_model=TrainingRecordingRead, status_code=201,
              dependencies=[Depends(require_writer)])
-async def add_training_example(
+async def upload_training_recording(
     agent_id: UUID,
-    body: TrainingExampleCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: CurrentUser,
-) -> TrainingExampleRead:
+    file: Annotated[UploadFile, File(...)],
+    label: Annotated[str, Form()] = "",
+) -> TrainingRecordingRead:
+    """Accept a multipart audio upload, store it in MinIO, and queue
+    the transcription job. Returns the recording in ``queued`` status;
+    the worker updates it to ``ready`` once transcription finishes."""
     from datetime import datetime, timezone
     from uuid import uuid4
 
     a = await agents_service.get_agent(
         session, tenant_id=user.tenant_id, agent_id=agent_id,
     )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="empty file",
+        )
+
+    cfg = get_config()
+    rec_id = str(uuid4())
+    storage_path = (
+        f"s3://{cfg.minio.bucket_recordings}/training/"
+        f"{user.tenant_id}/{agent_id}/{rec_id}-{file.filename}"
+    )
+
+    # Upload to MinIO synchronously via to_thread.
+    import asyncio as _asyncio
+    from io import BytesIO
+    from minio import Minio
+
+    def _put() -> None:
+        client = Minio(
+            cfg.minio.endpoint,
+            access_key=cfg.minio.access_key,
+            secret_key=cfg.minio.secret_key,
+            secure=cfg.minio.secure,
+        )
+        # Bucket may not exist on first run.
+        if not client.bucket_exists(cfg.minio.bucket_recordings):
+            client.make_bucket(cfg.minio.bucket_recordings)
+        key = storage_path[len(f"s3://{cfg.minio.bucket_recordings}/"):]
+        client.put_object(
+            cfg.minio.bucket_recordings, key,
+            BytesIO(contents), len(contents),
+            content_type=file.content_type or "application/octet-stream",
+        )
+
+    try:
+        await _asyncio.to_thread(_put)
+    except Exception as exc:                                 # pragma: no cover
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"object storage upload failed: {exc}",
+        ) from exc
+
     entry = {
-        "id": str(uuid4()),
-        "kind": "manual",
-        "user": body.user,
-        "agent": body.agent,
-        "notes": body.notes,
-        "added_at": datetime.now(timezone.utc).isoformat(),
-        "added_by": str(user.id),
+        "id": rec_id,
+        "agent_id": str(agent_id),
+        "filename": file.filename or "recording",
+        "content_type": file.content_type or "application/octet-stream",
+        "size_bytes": len(contents),
+        "label": label,
+        "storage_path": storage_path,
+        "status": "queued",        # arq job picks this up
+        "transcript": None,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by": str(user.id),
     }
-    a.training_examples = [*(a.training_examples or []), entry]
+    a.training_recordings = [*(a.training_recordings or []), entry]
     await session.flush()
+
+    # Queue transcription job. Worker side picks up `agent_train_recording`.
+    try:
+        from ...jobs.arq_pool import get_arq_pool
+        arq = await get_arq_pool()
+        await arq.enqueue_job("agent_train_recording",
+                              agent_id=str(agent_id),
+                              recording_id=rec_id)
+    except Exception:                                        # pragma: no cover
+        # Queue unavailable in dev — the recording stays in `queued`
+        # until the operator restarts the worker. Not fatal here.
+        pass
+
     await log_audit(
         session, user_id=user.id, tenant_id=user.tenant_id,
-        action="agent.training_example_add", target_type="agent",
-        target_id=agent_id, payload={"kind": "manual"},
+        action="agent.training_recording_upload", target_type="agent",
+        target_id=agent_id,
+        payload={"filename": entry["filename"], "size": entry["size_bytes"]},
     )
-    return TrainingExampleRead.model_validate(entry)
+    return TrainingRecordingRead.model_validate(entry)
 
 
-@router.delete("/{agent_id}/training-examples/{example_id}",
+@router.delete("/{agent_id}/training-recordings/{recording_id}",
                response_model=OkResponse,
                dependencies=[Depends(require_writer)])
-async def delete_training_example(
+async def delete_training_recording(
     agent_id: UUID,
-    example_id: str,
+    recording_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: CurrentUser,
 ) -> OkResponse:
     a = await agents_service.get_agent(
         session, tenant_id=user.tenant_id, agent_id=agent_id,
     )
-    before = len(a.training_examples or [])
-    a.training_examples = [
-        x for x in (a.training_examples or []) if x.get("id") != example_id
+    before = len(a.training_recordings or [])
+    a.training_recordings = [
+        x for x in (a.training_recordings or []) if x.get("id") != recording_id
     ]
-    if len(a.training_examples) == before:
+    if len(a.training_recordings) == before:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="training example not found",
+            detail="training recording not found",
         )
     await session.flush()
     await log_audit(
         session, user_id=user.id, tenant_id=user.tenant_id,
-        action="agent.training_example_delete", target_type="agent",
-        target_id=agent_id, payload={"example_id": example_id},
+        action="agent.training_recording_delete", target_type="agent",
+        target_id=agent_id, payload={"recording_id": recording_id},
     )
     return OkResponse()

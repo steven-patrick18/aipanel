@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,16 @@ from ...schemas.vicidial import (
     VicidialTestResult,
 )
 from ...services.audit_service import log_audit
+
+
+class ViciCampaignOption(BaseModel):
+    code: str
+    name: str
+
+
+class ViciIngroupOption(BaseModel):
+    code: str
+    name: str
 
 router = APIRouter(prefix="/vicidial-servers", tags=["vicidial"])
 
@@ -122,3 +133,42 @@ async def test_connection(
         ami_ok=False,
         ami_error="not implemented in v0.7",
     )
+
+
+# ---------------------------------------------------------------------------
+# Discovery — what campaigns + ingroups does this server expose?
+#
+# The "New deployment" form fills its dropdowns from these so the operator
+# never has to type ViciDial codes by hand.
+#
+# Real backend: query the ViciDial DB through session-mgr (which has
+# the adapter). Until session-mgr exposes a discovery endpoint we
+# return an empty list — the operator can still dial; it just means the
+# dropdown is empty and they need to fall back to typed codes.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{server_id}/campaigns", response_model=list[ViciCampaignOption])
+async def list_campaigns(
+    server_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    tenant_id: TenantId,
+) -> list[ViciCampaignOption]:
+    s = await session.get(VicidialServer, server_id)
+    if s is None or s.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="server not found")
+    # TODO: route through session-mgr — adapter v2_14.list_campaigns_request().
+    return []
+
+
+@router.get("/{server_id}/ingroups", response_model=list[ViciIngroupOption])
+async def list_ingroups(
+    server_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    tenant_id: TenantId,
+) -> list[ViciIngroupOption]:
+    s = await session.get(VicidialServer, server_id)
+    if s is None or s.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="server not found")
+    # TODO: route through session-mgr — adapter v2_14.list_ingroups_request().
+    return []

@@ -48,3 +48,6 @@ config.local.*
 .claude/
 
 # Local docker volumes (we keep dev/secrets.dev.env intentionally — see dev/README.md)
+
+# Mock backend persistent state — local-only data
+/mock-state.json
