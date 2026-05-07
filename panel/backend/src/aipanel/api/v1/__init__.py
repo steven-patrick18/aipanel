@@ -14,6 +14,7 @@ from . import (
     methodologies,
     system,
     tenants,
+    updates,
     vicidial_servers,
     voices,
 )
@@ -32,3 +33,4 @@ router.include_router(calls.router)
 router.include_router(analytics.router)
 router.include_router(cluster.router)
 router.include_router(system.router)
+router.include_router(updates.router)

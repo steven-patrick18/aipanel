@@ -5,6 +5,7 @@ import {
   Bot,
   Boxes,
   Database,
+  Download,
   Headphones,
   LayoutDashboard,
   LogOut,
@@ -57,6 +58,7 @@ const NAV_SYSTEM: NavItem[] = [
   { to: "/system/settings", label: "Settings",  icon: Settings },
   { to: "/system/users",    label: "Users",     icon: Users, adminOnly: true },
   { to: "/system/audit",    label: "Audit log", icon: Shield, adminOnly: true },
+  { to: "/system/updates",  label: "Updates",   icon: Download, adminOnly: true },
 ];
 
 function NavGroup({ title, items, role }: { title: string; items: NavItem[]; role: any }) {

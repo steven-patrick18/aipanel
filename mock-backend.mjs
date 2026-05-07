@@ -744,6 +744,97 @@ const routes = [
     ],
   })],
   ["GET", /^\/api\/v1\/system\/version$/, (_req, res) => json(res, { version: "1.0.0-mock" })],
+
+  // ---------- Updates (mock — fakes update.sh in 6 lines over 4 seconds) ----------
+  ["GET", /^\/api\/v1\/system\/updates\/info$/, (_req, res) => {
+    json(res, {
+      current_version: "1.0.0-mock",
+      current_sha: "mock0000000000000000000000000000000000000",
+      latest_tag: "1.0.0-mock",
+      behind_count: 0,
+      available_tags: ["1.0.0-mock"],
+      has_previous: false,
+      update_in_progress: !!state.active_update_id,
+    });
+  }],
+  ["POST", /^\/api\/v1\/system\/updates\/apply$/, async (req, res) => {
+    if (state.active_update_id) {
+      return json(res, { detail: "another update is in progress" }, 409);
+    }
+    const body = await readJson(req);
+    const id = randomUUID();
+    state.active_update_id = id;
+    state.update_runs = state.update_runs || {};
+    state.update_runs[id] = {
+      id, status: "running", exit_code: null,
+      started_at: new Date().toISOString(),
+      lines: [`$ sudo update.sh${body?.rollback ? " --rollback" : ""}${body?.target ? ` --to=${body.target}` : ""}`],
+    };
+    persist();
+    pushAudit("system.update_start", { run_id: id, target: body?.target, rollback: !!body?.rollback }, "system");
+    // Fake progress.
+    const steps = [
+      "[step] Update plan",
+      "  Current: 1.0.0-mock",
+      "  Target:  1.0.0-mock",
+      "[step] Pre-update backup",
+      "  pg_dump → /var/lib/aipanel/backups/pre-update-mock.sql.gz",
+      "[step] Fetch code",
+      "[step] Detect changes",
+      "[step] Rolling restart",
+      "  ✓ aipanel-web active",
+      "  ✓ aipanel-llm active",
+      "[step] Post-update health",
+      "[mock] Done.",
+    ];
+    let i = 0;
+    const tick = setInterval(() => {
+      const run = state.update_runs[id];
+      if (!run) { clearInterval(tick); return; }
+      if (i >= steps.length) {
+        run.status = "ok";
+        run.exit_code = 0;
+        state.active_update_id = null;
+        persist();
+        clearInterval(tick);
+        return;
+      }
+      run.lines.push(steps[i++]);
+      persist();
+    }, 350);
+    json(res, { run_id: id }, 202);
+  }],
+  ["GET", /^\/api\/v1\/system\/updates\/runs\/([^/]+)$/, (_req, res, m) => {
+    const r = (state.update_runs || {})[m[1]];
+    if (!r) return json(res, { detail: "run not found" }, 404);
+    json(res, r);
+  }],
+  ["GET", /^\/api\/v1\/system\/updates\/runs\/([^/]+)\/stream$/, (_req, res, m) => {
+    const id = m[1];
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    });
+    let cursor = 0;
+    const push = () => {
+      const r = (state.update_runs || {})[id];
+      if (!r) { res.write("event: done\ndata: error|-1\n\n"); res.end(); return true; }
+      while (cursor < r.lines.length) {
+        res.write(`data: ${r.lines[cursor++]}\n\n`);
+      }
+      if (r.status !== "running") {
+        res.write(`event: done\ndata: ${r.status}|${r.exit_code}\n\n`);
+        res.end();
+        return true;
+      }
+      return false;
+    };
+    if (push()) return;
+    const tick = setInterval(() => { if (push()) clearInterval(tick); }, 250);
+    res.on("close", () => clearInterval(tick));
+  }],
   ["GET", /^\/api\/v1\/system\/config$/, (_req, res) => json(res, {
     panel_public_url: "http://127.0.0.1:8055",
     sip_listen_port: 5060,

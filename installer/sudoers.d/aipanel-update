@@ -1,0 +1,20 @@
+# /etc/sudoers.d/aipanel-update — installed by installer/lib/panel.sh.
+#
+# Lets the aipanel user trigger update.sh from the panel UI without an
+# interactive password. The Cmnd_Alias is restrictive — only the
+# specific update script is allowed, with whitelisted flags. Anything
+# else still requires a real sudoer.
+#
+# Validate after editing with:  visudo -c -f /etc/sudoers.d/aipanel-update
+
+Cmnd_Alias AIPANEL_UPDATE = \
+    /opt/aipanel/update.sh, \
+    /opt/aipanel/update.sh --yes, \
+    /opt/aipanel/update.sh --yes --rollback, \
+    /opt/aipanel/update.sh --yes --skip-backup, \
+    /opt/aipanel/update.sh --yes --to=*, \
+    /opt/aipanel/update.sh --yes --to=* --skip-backup
+
+aipanel ALL=(root) NOPASSWD: AIPANEL_UPDATE
+
+Defaults!AIPANEL_UPDATE !requiretty

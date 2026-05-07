@@ -74,10 +74,25 @@ panel_install_systemd_units() {
     log_info "${PANEL_WEB_UNIT} + ${PANEL_JOBS_UNIT} enabled (NOT started)"
 }
 
+panel_install_sudoers() {
+    # Lets the panel UI's "Apply update" button run update.sh non-interactively.
+    # Restrictive Cmnd_Alias — only update.sh with whitelisted flags.
+    local src="${AIPANEL_PREFIX}/installer/sudoers.d/aipanel-update"
+    local dst="/etc/sudoers.d/aipanel-update"
+    [[ -f "${src}" ]] || die "sudoers fragment missing: ${src}"
+    log_info "Installing ${dst}"
+    install -m 0440 -o root -g root "${src}" "${dst}"
+    if ! visudo -c -f "${dst}" >/dev/null 2>&1; then
+        rm -f "${dst}"
+        die "sudoers validation failed for ${dst} — refused to install"
+    fi
+}
+
 panel_setup() {
     panel_setup_venv
     panel_install_package
     panel_alembic_upgrade
     panel_setup_frontend_placeholder
     panel_install_systemd_units
+    panel_install_sudoers
 }

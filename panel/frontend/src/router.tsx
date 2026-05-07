@@ -23,6 +23,7 @@ import { Health } from "@/pages/system/Health";
 import { Settings } from "@/pages/system/Settings";
 import { Users } from "@/pages/system/Users";
 import { Audit } from "@/pages/system/Audit";
+import { Updates } from "@/pages/system/Updates";
 
 export const router = createBrowserRouter([
   {
@@ -59,6 +60,7 @@ export const router = createBrowserRouter([
       { path: "/system/settings", element: <Settings /> },
       { path: "/system/users", element: <Users /> },
       { path: "/system/audit", element: <Audit /> },
+      { path: "/system/updates", element: <Updates /> },
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
