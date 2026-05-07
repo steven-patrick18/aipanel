@@ -67,6 +67,9 @@ function defaultState() {
     // Per-agent training recordings — operator-uploaded audio that the
     // worker pipeline transcribes + adds to the few-shot pool.
     training_recordings: {},   // agent_id → [recording, ...]
+    // Per-agent saved chat training — exchanges the operator thumbed-up
+    // from the in-editor chat sandbox.
+    training_chats: {},        // agent_id → [{user, agent, saved_at}, ...]
   };
 }
 
@@ -272,7 +275,7 @@ const routes = [
       persona: body?.persona || { name: "", age_range: "", gender: "neutral", accent: "", backstory: "" },
       script: body?.script || { opening_variants: [""], sections: [], closing: "", objections: [] },
       scenario_tree: body?.scenario_tree || { rules: [] },
-      training_examples: [],
+      training_script: body?.training_script || "",
       voice_id: body?.voice_id || null,
       language: body?.language || "en",
       kb_collection_id: body?.kb_collection_id || null,
@@ -374,6 +377,82 @@ const routes = [
     pushAudit("agent.training_recording_delete", { recording_id: m[2] }, "agent", m[1]);
     persist();
     json(res, { ok: true });
+  }],
+
+  // ---------- Training: script (single text blob) ----------
+  // The operator pastes the whole script as one block here. The worker
+  // reads it as system context. This is the simple alternative to the
+  // Script tab's structured Openings/Sections/Closing fields.
+  ["GET", /^\/api\/v1\/agents\/([^/]+)\/training-script$/, (_req, res, m) => {
+    const a = state.agents.find(x => x.id === m[1]);
+    if (!a) return json(res, { detail: "agent not found" }, 404);
+    json(res, { script: a.training_script || "" });
+  }],
+  ["PUT", /^\/api\/v1\/agents\/([^/]+)\/training-script$/, async (req, res, m) => {
+    const a = state.agents.find(x => x.id === m[1]);
+    if (!a) return json(res, { detail: "agent not found" }, 404);
+    const body = await readJson(req);
+    a.training_script = (body?.script || "").trim();
+    a.updated_at = new Date().toISOString();
+    pushAudit("agent.training_script_update",
+              { length: a.training_script.length }, "agent", a.id);
+    persist();
+    json(res, { script: a.training_script });
+  }],
+
+  // ---------- Training: chat sandbox ----------
+  // The operator chats with the agent like a real customer would. The
+  // mock returns canned responses based on what's in the script. The
+  // real backend routes through vLLM with the agent's full prompt.
+  ["POST", /^\/api\/v1\/agents\/([^/]+)\/chat$/, async (req, res, m) => {
+    const a = state.agents.find(x => x.id === m[1]);
+    if (!a) return json(res, { detail: "agent not found" }, 404);
+    const body = await readJson(req);
+    const message = (body?.message || "").trim();
+    if (!message) return json(res, { detail: "message required" }, 422);
+    json(res, { reply: mockReply(a, message) });
+  }],
+
+  // Saved chat exchanges that count toward training.
+  ["GET", /^\/api\/v1\/agents\/([^/]+)\/training-chats$/, (_req, res, m) => {
+    json(res, state.training_chats[m[1]] ?? []);
+  }],
+  ["POST", /^\/api\/v1\/agents\/([^/]+)\/training-chats$/, async (req, res, m) => {
+    const a = state.agents.find(x => x.id === m[1]);
+    if (!a) return json(res, { detail: "agent not found" }, 404);
+    const body = await readJson(req);
+    if (!body?.user || !body?.agent) {
+      return json(res, { detail: "user and agent required" }, 422);
+    }
+    state.training_chats[m[1]] = state.training_chats[m[1]] || [];
+    const entry = {
+      id: randomUUID(),
+      user: body.user, agent: body.agent,
+      saved_at: new Date().toISOString(),
+    };
+    state.training_chats[m[1]].unshift(entry);
+    pushAudit("agent.training_chat_save", {}, "agent", a.id);
+    persist();
+    json(res, entry, 201);
+  }],
+  ["DELETE", /^\/api\/v1\/agents\/([^/]+)\/training-chats\/([^/]+)$/, (_req, res, m) => {
+    const list = state.training_chats[m[1]] || [];
+    const before = list.length;
+    state.training_chats[m[1]] = list.filter(x => x.id !== m[2]);
+    if (state.training_chats[m[1]].length === before) {
+      return json(res, { detail: "training chat not found" }, 404);
+    }
+    persist();
+    json(res, { ok: true });
+  }],
+
+  // ---------- Capability score — how trained is this agent? ----------
+  // Deterministic, transparent breakdown so the operator knows exactly
+  // what to do next to bump the number up.
+  ["GET", /^\/api\/v1\/agents\/([^/]+)\/capability$/, (_req, res, m) => {
+    const a = state.agents.find(x => x.id === m[1]);
+    if (!a) return json(res, { detail: "agent not found" }, 404);
+    json(res, computeCapability(a));
   }],
 
   // ---------- Voices ----------
@@ -759,6 +838,62 @@ function sseLiveDeployment(_req, res) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Capability score: 0–100. Transparent breakdown so the operator can
+// see exactly what to add next to push the number up.
+function computeCapability(a) {
+  const recordings = (state.training_recordings[a.id] || [])
+    .filter(r => r.status === "ready").length;
+  const chats = (state.training_chats[a.id] || []).length;
+  const hasScript = !!(a.training_script?.trim()
+    || a.script?.opening_variants?.[0]?.trim());
+  const hasPersona = !!(a.persona?.name?.trim() && a.persona?.backstory?.trim());
+  const hasVoice = !!a.voice_id;
+
+  const recordingsPts = Math.min(recordings, 6) * 5;   // up to 30
+  const chatsPts      = Math.min(chats, 5) * 4;        // up to 20
+  const scriptPts     = hasScript  ? 25 : 0;
+  const personaPts    = hasPersona ? 15 : 0;
+  const voicePts      = hasVoice   ? 10 : 0;
+
+  const score = recordingsPts + chatsPts + scriptPts + personaPts + voicePts;
+  return {
+    score,
+    breakdown: [
+      { key: "script",     label: "Script provided",            points: scriptPts,     max: 25, done: hasScript },
+      { key: "persona",    label: "Persona filled in",          points: personaPts,    max: 15, done: hasPersona },
+      { key: "recordings", label: `${recordings} call recording${recordings===1?"":"s"} transcribed`,
+                                                                points: recordingsPts, max: 30, done: recordings >= 6 },
+      { key: "chats",      label: `${chats} chat exchange${chats===1?"":"s"} saved`,
+                                                                points: chatsPts,      max: 20, done: chats >= 5 },
+      { key: "voice",      label: "Voice cloned",               points: voicePts,      max: 10, done: hasVoice },
+    ],
+  };
+}
+
+// Mock reply — pretends to be a customer-care AI. Uses the agent's name
+// + script content so the operator can sanity-check tone. The real
+// backend routes this through vLLM with the full agent prompt.
+function mockReply(a, message) {
+  const name = a.persona?.name || "the agent";
+  const lower = message.toLowerCase();
+  const script = (a.training_script || "").toLowerCase();
+  const looksLikeOrderQ  = /(order|tracking|where|delivery|shipped)/.test(lower);
+  const looksLikeRefund  = /(refund|return|money back)/.test(lower);
+  const looksLikeBroken  = /(broken|damaged|not working|defect|crack)/.test(lower);
+  const looksLikeBilling = /(charge|bill|invoice|payment)/.test(lower);
+  const looksLikeHi      = /(hi|hello|hey|good (morning|afternoon))\b/.test(lower);
+
+  if (looksLikeHi)      return `Hi! This is ${name}. How can I help you today?`;
+  if (looksLikeOrderQ)  return `Sure — can I get your order number to look that up? It's in your confirmation email.`;
+  if (looksLikeRefund)  return `Absolutely. Refunds within 30 days are no problem. What's your order number?`;
+  if (looksLikeBroken)  return `I'm sorry to hear that. Can you share the order number and a quick description of the damage?`;
+  if (looksLikeBilling) return `Happy to look at that. Can you share your order number and roughly when you were charged?`;
+
+  // Generic fallback that pulls a hint from the script if available.
+  const hint = script ? " Based on the script you uploaded, I'll route this through the standard playbook." : "";
+  return `Got it.${hint} Could you tell me a bit more so I can help you properly?`;
+}
+
 function readJson(req) {
   return new Promise((resolve) => {
     const bufs = [];
@@ -822,7 +957,7 @@ function readMultipart(req) {
 const server = http.createServer(async (req, res) => {
   // Preflight + CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
