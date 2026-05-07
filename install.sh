@@ -32,10 +32,31 @@ for module in preflight.sh deps.sh user.sh secrets.sh config.sh \
               workers.sh \
               session_mgr.sh \
               panel.sh frontend.sh nginx.sh \
-              ops.sh; do
+              ops.sh \
+              join.sh; do
     # shellcheck disable=SC1090
     . "${LIB_DIR}/${module}"
 done
+
+# ---------------------------------------------------------------------------
+# Argument parsing — we accept a small surface so we can be invoked in
+# "join an existing cluster" mode by the curl-pipe install snippet the
+# panel UI generates.
+# ---------------------------------------------------------------------------
+AIP_JOIN_TOKEN=""
+AIP_JOIN_PRIMARY=""
+AIP_JOIN_ROLE=""
+for arg in "$@"; do
+    case "$arg" in
+        --token=*)   AIP_JOIN_TOKEN="${arg#*=}" ;;
+        --primary=*) AIP_JOIN_PRIMARY="${arg#*=}" ;;
+        --role=*)    AIP_JOIN_ROLE="${arg#*=}" ;;
+        --help|-h)   sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        "") ;;
+        *) ;;  # silently ignore unknowns; join.sh validates its own
+    esac
+done
+export AIP_JOIN_TOKEN AIP_JOIN_PRIMARY AIP_JOIN_ROLE
 
 # ---------------------------------------------------------------------------
 # Logging — we tee everything to /var/log/aipanel/install.log. The log dir
@@ -84,6 +105,18 @@ chown "${AIPANEL_USER}:${AIPANEL_GROUP}" "${AIPANEL_LOG_DIR}"
 
 log_step "Install OS packages"
 deps_install_all
+
+# ---------------------------------------------------------------------------
+# Branch: cluster-join mode (--token=...) skips the rest of the primary
+# install and runs the join orchestration instead.
+# ---------------------------------------------------------------------------
+if [[ -n "${AIP_JOIN_TOKEN}" ]]; then
+    log_step "Cluster-join mode — skipping primary infra install"
+    join_run
+    log_info ""
+    log_info "Done. This node is now part of the cluster."
+    exit 0
+fi
 
 # Generate /etc/aipanel/secrets.env on first install. After this point the
 # DB / Redis / MinIO / JWT / encryption secrets are available in $ENV.

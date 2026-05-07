@@ -70,6 +70,9 @@ function defaultState() {
     // Per-agent saved chat training — exchanges the operator thumbed-up
     // from the in-editor chat sandbox.
     training_chats: {},        // agent_id → [{user, agent, saved_at}, ...]
+    // Cluster: registered nodes + outstanding join tokens.
+    nodes: null,               // null → seeded with primary on first GET
+    join_tokens: [],
   };
 }
 
@@ -842,13 +845,141 @@ const routes = [
     stt_model: "large-v3",
     tts_backend: "f5",
   })],
-  ["GET", /^\/api\/v1\/cluster\/nodes$/, (_req, res) => json(res, [{
-    id: "node-local", hostname: "localhost.dev", role: "primary",
-    services: ["aipanel-mock"],
-    status: "ok",
-    last_heartbeat_at: new Date().toISOString(),
-    joined_at: "2026-01-01T00:00:00Z",
-  }])],
+  ["GET", /^\/api\/v1\/cluster\/nodes$/, (_req, res) => {
+    state.nodes = state.nodes || [{
+      id: "node-local", hostname: "localhost.dev", role: "primary",
+      services: ["aipanel-web", "aipanel-jobs", "aipanel-workers",
+                 "aipanel-session-mgr", "aipanel-llm",
+                 "aipanel-stt", "aipanel-tts", "aipanel-sip"],
+      status: "ok",
+      last_heartbeat_at: new Date().toISOString(),
+      joined_at: "2026-01-01T00:00:00Z",
+      drained_at: null,
+    }];
+    // Refresh primary's heartbeat each list call.
+    const primary = state.nodes.find(n => n.role === "primary");
+    if (primary) primary.last_heartbeat_at = new Date().toISOString();
+    json(res, state.nodes);
+  }],
+  ["GET", /^\/api\/v1\/cluster\/health$/, (_req, res) => {
+    json(res, { healthy_nodes: (state.nodes || []).filter(n => n.status !== "down").length });
+  }],
+  // ----- Join tokens -----
+  ["GET", /^\/api\/v1\/cluster\/join-tokens$/, (_req, res) => {
+    json(res, (state.join_tokens || []).map(t => ({
+      id: t.id, role: t.role, label: t.label,
+      created_at: t.created_at, expires_at: t.expires_at,
+      consumed_at: t.consumed_at,
+    })));
+  }],
+  ["POST", /^\/api\/v1\/cluster\/join-tokens$/, async (req, res) => {
+    const body = await readJson(req);
+    const role = body?.role || "mixed";
+    if (!["gpu", "app", "sip", "mixed"].includes(role)) {
+      return json(res, { detail: "role must be gpu | app | sip | mixed" }, 422);
+    }
+    const ttl = Math.min(Math.max(parseInt(body?.ttl_minutes ?? "60", 10) || 60, 5), 1440);
+    const tokenSecret = "AIPANEL-" + randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
+    const tok = {
+      id: randomUUID(),
+      token: tokenSecret,
+      role, label: body?.label || "",
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + ttl * 60_000).toISOString(),
+      consumed_at: null,
+    };
+    state.join_tokens = state.join_tokens || [];
+    state.join_tokens.unshift(tok);
+    pushAudit("cluster.join_token_create", { role, ttl_minutes: ttl }, "node_join_token", tok.id);
+    json(res, {
+      id: tok.id, role, label: tok.label,
+      created_at: tok.created_at, expires_at: tok.expires_at,
+      consumed_at: null,
+      token: tokenSecret,
+      install_command:
+        `curl -fsSL http://127.0.0.1:8055/install-join.sh | ` +
+        `sudo bash -s -- --token=${tokenSecret} ` +
+        `--primary=http://127.0.0.1:8055 --role=${role}`,
+    }, 201);
+  }],
+  ["DELETE", /^\/api\/v1\/cluster\/join-tokens\/([^/]+)$/, (_req, res, m) => {
+    const before = (state.join_tokens || []).length;
+    state.join_tokens = (state.join_tokens || []).filter(t => t.id !== m[1]);
+    if (state.join_tokens.length === before) return json(res, { detail: "token not found" }, 404);
+    persist();
+    res.writeHead(204); res.end();
+  }],
+  // ----- Node lifecycle -----
+  ["POST", /^\/api\/v1\/cluster\/nodes\/([^/]+)\/drain$/, (_req, res, m) => {
+    const n = (state.nodes || []).find(x => x.id === m[1]);
+    if (!n) return json(res, { detail: "node not found" }, 404);
+    n.drained_at = new Date().toISOString();
+    n.status = "draining";
+    setTimeout(() => { n.status = "drained"; persist(); }, 1500);
+    pushAudit("cluster.node_drain", {}, "node", n.id);
+    json(res, { ok: true, drained_at: n.drained_at });
+  }],
+  ["DELETE", /^\/api\/v1\/cluster\/nodes\/([^/]+)$/, (_req, res, m) => {
+    const n = (state.nodes || []).find(x => x.id === m[1]);
+    if (!n) return json(res, { detail: "node not found" }, 404);
+    if (n.role === "primary") return json(res, { detail: "cannot remove the primary node" }, 400);
+    if (!["down", "drained", "draining"].includes(n.status)) {
+      return json(res, { detail: "node must be drained first" }, 400);
+    }
+    state.nodes = state.nodes.filter(x => x.id !== m[1]);
+    pushAudit("cluster.node_remove", { hostname: n.hostname }, "node", n.id);
+    persist();
+    res.writeHead(204); res.end();
+  }],
+  ["PATCH", /^\/api\/v1\/cluster\/nodes\/([^/]+)$/, async (req, res, m) => {
+    const body = await readJson(req);
+    const n = (state.nodes || []).find(x => x.id === m[1]);
+    if (!n) return json(res, { detail: "node not found" }, 404);
+    if (n.role === "primary") return json(res, { detail: "cannot change primary's role" }, 400);
+    const old = n.role;
+    n.role = body?.role || n.role;
+    pushAudit("cluster.node_role_change", { from: old, to: n.role }, "node", n.id);
+    persist();
+    json(res, n);
+  }],
+  // The mock simulates a remote node phoning home with this token. After
+  // the admin clicks "Add node" + copies the token, they can hit
+  // POST /api/v1/cluster/_mock-simulate-join with { token } from the UI
+  // to make a fake new node appear in the list. The real install.sh
+  // calls /api/v1/cluster/join with the same payload.
+  ["POST", /^\/api\/v1\/cluster\/_mock-simulate-join$/, async (req, res) => {
+    const body = await readJson(req);
+    const tok = (state.join_tokens || []).find(t => t.token === body?.token);
+    if (!tok) return json(res, { detail: "invalid token" }, 403);
+    if (tok.consumed_at) return json(res, { detail: "token already used" }, 409);
+    if (new Date(tok.expires_at) < new Date()) return json(res, { detail: "token expired" }, 410);
+    const services_for = {
+      gpu: ["aipanel-llm", "aipanel-stt", "aipanel-tts"],
+      app: ["aipanel-web", "aipanel-jobs", "aipanel-workers", "aipanel-session-mgr"],
+      sip: ["aipanel-sip"],
+      mixed: ["aipanel-web", "aipanel-jobs", "aipanel-workers",
+              "aipanel-session-mgr", "aipanel-llm", "aipanel-stt",
+              "aipanel-tts", "aipanel-sip"],
+    };
+    const node = {
+      id: randomUUID(),
+      hostname: body?.hostname || `node-${(state.nodes || []).length + 1}.dev`,
+      role: tok.role,
+      services: services_for[tok.role] || [],
+      status: "joining",
+      last_heartbeat_at: new Date().toISOString(),
+      joined_at: new Date().toISOString(),
+      drained_at: null,
+    };
+    state.nodes = state.nodes || [];
+    state.nodes.push(node);
+    tok.consumed_at = new Date().toISOString();
+    tok.consumed_by_node = node.id;
+    setTimeout(() => { node.status = "ok"; persist(); }, 2000);
+    pushAudit("cluster.node_joined", { hostname: node.hostname, role: tok.role }, "node", node.id);
+    persist();
+    json(res, { node_id: node.id, role: tok.role });
+  }],
 
   // ---------- Tenants / Users ----------
   ["GET", /^\/api\/v1\/tenants$/, (_req, res) => json(res, [{

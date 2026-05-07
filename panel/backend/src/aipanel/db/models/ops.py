@@ -39,6 +39,41 @@ class Node(Base):
         server_default=func.now(),
         nullable=False,
     )
+    drained_at:        Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class NodeJoinToken(Base):
+    __tablename__ = "node_join_tokens"
+
+    id:               Mapped[UUID]               = uuid_pk()
+    token_hash:       Mapped[str]                = mapped_column(
+        Text, nullable=False, unique=True
+    )
+    role:             Mapped[str]                = mapped_column(Text, nullable=False)
+    label:            Mapped[str]                = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
+    created_by:       Mapped[UUID | None]        = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    created_at:       Mapped[datetime]           = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    expires_at:       Mapped[datetime]           = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at:      Mapped[datetime | None]    = mapped_column(
+        DateTime(timezone=True)
+    )
+    consumed_by_node: Mapped[UUID | None]        = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("nodes.id", ondelete="SET NULL"),
+    )
 
 
 class AuditLog(Base):
